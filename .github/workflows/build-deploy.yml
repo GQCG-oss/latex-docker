@@ -1,0 +1,54 @@
+name: Build and deploy
+
+on:
+  push:
+    branches:
+      - 'master'
+    paths:
+      - '.github/workflows/build-deploy.yml'
+      - 'Dockerfile'
+  pull_request:
+    branches:
+      - 'master'
+    paths:
+      - '.github/workflows/build-deploy.yml'
+      - 'Dockerfile'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - name: Set up Git repository
+      uses: actions/checkout@v3
+    - name: Log in to the Container registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Extract metadata (tags, labels) for Docker
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ghcr.io/${{ github.repository}}/latex-docker
+    - name: Build Docker image
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: docker/build-push-action@v3
+      with:
+        context: .
+        file: Dockerfile
+        push: false
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+    - name: Build and push Docker image
+      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+      uses: docker/build-push-action@v3
+      with:
+        context: .
+        file: Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
