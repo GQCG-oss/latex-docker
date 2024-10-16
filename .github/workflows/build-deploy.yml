@@ -13,20 +13,24 @@ on:
       - 'Dockerfile'
 
 jobs:
-  docker:
-    runs-on: ubuntu-latest
+  build-image:
+    runs-on: ${{ matrix.builder }}
+    strategy:
+      matrix:
+        include:
+          - builder: ubuntu-latest
+            platform: amd64
+          - builder: ubuntu-latest
+            platform: arm64
     permissions:
       contents: read
       packages: write
     steps:
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
-    - name: Set up Git repository
-      uses: actions/checkout@v3
 
     - name: Log in to the Container registry
       uses: docker/login-action@v2
@@ -45,20 +49,49 @@ jobs:
       if: ${{ github.event_name == 'pull_request' }}
       uses: docker/build-push-action@v6
       with:
-        platforms: linux/amd64, linux/arm64
+        platforms: linux/${{ matrix.platform }}
         context: .
         file: Dockerfile
+        provenance: false # https://github.com/docker/buildx/issues/1608
         push: false
-        tags: ${{ steps.meta.outputs.tags }}
+        tags: ${{ steps.meta.outputs.tags }}-${{ matrix.platform }}
         labels: ${{ steps.meta.outputs.labels }}
-        
+
     - name: Build and push Docker image
       if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
       uses: docker/build-push-action@v6
       with:
-        platforms: linux/amd64, linux/arm64
+        platforms: linux/${{ matrix.platform }}
         context: .
         file: Dockerfile
+        provenance: false # https://github.com/docker/buildx/issues/1608
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
+        tags: ${{ steps.meta.outputs.tags }}-${{ matrix.platform }}
         labels: ${{ steps.meta.outputs.labels }}
+
+  manifest:
+    runs-on: ubuntu-latest
+    needs: build-image
+
+    steps:
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository}}/latex-docker
+
+      - name: Create and push manifest images
+        uses: Noelware/docker-manifest-action@56f19b00084cefe1b43752e27025979fa5707a70 #0.3.1
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        with:
+          inputs: ${{ steps.meta.outputs.tags }}
+          images: ${{ steps.meta.outputs.tags }}-amd64,ghcr.io/${{ steps.meta.outputs.tags }}-arm64
+          push: true
+
